@@ -8,31 +8,100 @@ permissions:
   contents: write
 
 jobs:
-  windows:
-    runs-on: windows-latest
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
+          - { os: macos-latest, target: x86_64-apple-darwin }  # кросс-сборка на arm-раннере
+          - { os: macos-latest, target: aarch64-apple-darwin }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with: { targets: "${{ matrix.target }}" }
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --release
-      - run: cargo build --release
+      - name: Linux deps
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libgl1-mesa-dev
+      - if: matrix.target != 'x86_64-apple-darwin'
+        run: cargo test --release --target ${{ matrix.target }}
+      - run: cargo build --release --target ${{ matrix.target }}
       - name: Version
-        id: v
-        shell: bash
-        run: echo "v=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
-      - name: Installer
+        run: echo "V=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_ENV"
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          $bin = "target\${{ matrix.target }}\release\playerok-university.exe"
           if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress; $env:PATH += ";${env:ProgramFiles(x86)}\Inno Setup 6" }
-          iscc "/DAppVersion=${{ steps.v.outputs.v }}" installer\setup.iss
-          Copy-Item target\release\playerok-university.exe dist\PlayerokUniversity-portable.exe
+          # setup.iss ждёт exe в target\release
+          New-Item -ItemType Directory -Force target\release | Out-Null
+          Copy-Item $bin target\release\playerok-university.exe -Force
+          iscc "/DAppVersion=$env:V" installer\setup.iss
+          Copy-Item $bin dist\PlayerokUniversity-portable.exe
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist pkg/usr/bin pkg/usr/share/applications pkg/DEBIAN
+          B=target/${{ matrix.target }}/release/playerok-university
+          cp $B pkg/usr/bin/playerok-university
+          cat > pkg/usr/share/applications/playerok-university.desktop <<D
+          [Desktop Entry]
+          Name=PlayerokUniversity
+          Exec=playerok-university
+          Type=Application
+          Categories=Office;Finance;
+          D
+          sed -i 's/^ *//' pkg/usr/share/applications/playerok-university.desktop
+          cat > pkg/DEBIAN/control <<D
+          Package: playerok-university
+          Version: $V
+          Architecture: amd64
+          Maintainer: PlayerokUniversity
+          Description: Учёт сделок и профита на Playerok
+          D
+          sed -i 's/^ *//' pkg/DEBIAN/control
+          dpkg-deb --build pkg dist/PlayerokUniversity-$V-amd64.deb
+          tar -czf dist/PlayerokUniversity-$V-linux-x86_64.tar.gz -C target/${{ matrix.target }}/release playerok-university
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          A=${{ matrix.target == 'aarch64-apple-darwin' && 'arm64' || 'x86_64' }}
+          mkdir -p dist stage/PlayerokUniversity.app/Contents/MacOS
+          cp target/${{ matrix.target }}/release/playerok-university stage/PlayerokUniversity.app/Contents/MacOS/
+          cat > stage/PlayerokUniversity.app/Contents/Info.plist <<P
+          <?xml version="1.0" encoding="UTF-8"?>
+          <plist version="1.0"><dict>
+          <key>CFBundleName</key><string>PlayerokUniversity</string>
+          <key>CFBundleExecutable</key><string>playerok-university</string>
+          <key>CFBundleIdentifier</key><string>com.playerokuniversity.app</string>
+          <key>CFBundleVersion</key><string>$V</string>
+          <key>CFBundleShortVersionString</key><string>$V</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>NSHighResolutionCapable</key><true/>
+          </dict></plist>
+          P
+          ln -s /Applications stage/Applications
+          hdiutil create -volname PlayerokUniversity -srcfolder stage -ov -format UDZO dist/PlayerokUniversity-$V-macos-$A.dmg
       - uses: actions/upload-artifact@v4
         with:
-          name: windows
-          path: dist/*.exe
-      - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+          name: ${{ matrix.target }}
+          path: dist/*
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.exe
+          files: dist/*
           generate_release_notes: true

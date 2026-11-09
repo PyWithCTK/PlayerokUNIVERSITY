@@ -8,8 +8,9 @@
 
 Скачай со страницы [Releases](../../releases):
 
-- `PlayerokUniversity-Setup-X.Y.Z.exe` — установщик (ярлыки, удаление через «Приложения»);
-- `PlayerokUniversity-portable.exe` — без установки, просто запусти.
+- Windows: `PlayerokUniversity-Setup-X.Y.Z.exe` (установщик) или `PlayerokUniversity-portable.exe`;
+- Linux: `.deb` (`sudo apt install ./файл.deb`) или `.tar.gz`;
+- macOS: `.dmg` (Apple Silicon — `arm64`, Intel — `x86_64`; приложение без подписи: правый клик → «Открыть»).
 
 ## Где данные
 
