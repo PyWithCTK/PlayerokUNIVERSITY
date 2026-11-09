@@ -1,0 +1,18 @@
+[package]
+name = "playerok-university"
+version = "2.0.0"
+edition = "2021"
+description = "Учёт сделок и профита на Playerok"
+
+[dependencies]
+eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
+egui_extras = "0.37"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
